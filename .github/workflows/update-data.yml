@@ -2,7 +2,7 @@ name: Update GKI Kernel Data
 
 on:
   schedule:
-    - cron: '0 8 */3 * *'  # 每 3 天 UTC 8:00
+    - cron: '0 8 */3 * *'  # every 3 days at 08:00 UTC
   workflow_dispatch:
   push:
     branches: [main]
@@ -21,10 +21,10 @@ jobs:
   update-data:
     runs-on: ubuntu-latest
     steps:
-      # GITHUB_TOKEN 永远无法推送 .github/workflows 变更（官方不提供
-      # workflow scope，防止 Actions 自我修改），必须用带 workflow
-      # 权限的 PAT secret 推送；未配置时回退 GITHUB_TOKEN（仅推
-      # data/ 等非 workflow 文件时依然可用）。
+      # GITHUB_TOKEN can never push changes to .github/workflows (GitHub does not provide
+      # the workflow scope, to prevent Actions from modifying itself); a PAT with workflow
+      # permissions is required to push; if not configured, fall back to GITHUB_TOKEN (still usable when pushing only
+      # non-workflow files such as data/).
       - uses: actions/checkout@v7
         with:
           token: ${{ secrets.WORKFLOW_PUSH_TOKEN || github.token }}

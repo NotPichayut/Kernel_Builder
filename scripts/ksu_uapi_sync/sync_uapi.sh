@@ -1,25 +1,27 @@
 #!/usr/bin/env bash
-# SukiSU builtin 分支内核 UAPI 动态同步（对齐官方 main 分支管理器）
+# Dynamically synchronize the kernel UAPI on the SukiSU builtin branch with the official main-branch manager.
 #
-# 背景：
-#   builtin 分支（内建+SUSFS 产品线）与官方 main 分支相互独立，
-#   官方管理器 APK 始终按 main 分支构建。main 的 uapi/supercall.h
-#   抬升 KERNEL_SU_UAPI_VERSION 时（如 3b60791 把 UAPI 升到 6 并新增
-#   KSU_IOCTL_LOOKUP_SYMBOLS / KSU_GET_INFO_FLAG_PREINIT），builtin 检出
-#   的内核 UAPI 落后于管理器，管理器 requiresNewKernel = true，
-#   首页报"需要更新内核"（Natives.kt: managerUAPIVersion > kernelUAPIVersion）。
+# Background:
+#   The builtin branch (builtin + SUSFS product line) and the official main branch
+#   are independent. The official manager APK is always built from main. When
+#   main's uapi/supercall.h raises KERNEL_SU_UAPI_VERSION (for example, commit
+#   3b60791 raised the UAPI to 6 and added KSU_IOCTL_LOOKUP_SYMBOLS /
+#   KSU_GET_INFO_FLAG_PREINIT), the kernel UAPI checked out on builtin falls behind
+#   the manager. The manager sets requiresNewKernel = true and displays "Kernel
+#   update required" on its home page (Natives.kt: managerUAPIVersion > kernelUAPIVersion).
 #
-# 本脚本动态移植：读取官方 main 的 uapi/supercall.h，将其相对 builtin
-# 检出缺失的「UAPI 常量声明 + KSU_GET_INFO_FLAG_* 位 + 新增 ioctl 常量 +
-# struct ksu_lookup_symbols_cmd」按官方原文追加到 builtin 头文件，
-# UAPI 号抬到与 main 一致。内核侧配套能力（LOOKUP_SYMBOLS 处理器、
-# symbol_resolver）由 build.yml 在本脚本之后以独立内容检测步骤注入。
+# This script dynamically backports missing declarations from the official main
+# uapi/supercall.h to the builtin header: UAPI constants, KSU_GET_INFO_FLAG_* bits,
+# new ioctl constants, and struct ksu_lookup_symbols_cmd. It raises the UAPI version
+# to match main. Supporting kernel-side functionality (the LOOKUP_SYMBOLS handler
+# and symbol_resolver) is injected by build.yml afterward in a separate
+# content-detection step.
 #
-# 移植均为内容检测：已包含则跳过，重复执行幂等；上游 builtin 自行同步
-# UAPI 后同样自动跳过。
+# Backports are guarded by content checks: existing code is skipped, making reruns
+# idempotent. The changes are also skipped automatically once builtin syncs its UAPI upstream.
 #
-# 用法: sync_uapi.sh [KernelSU 目录]（调用方工作目录需为 $KERNEL_ROOT，
-#       需可访问官方仓库 raw.githubusercontent.com）
+# Usage: sync_uapi.sh [KernelSU directory] (the caller's working directory must be
+# $KERNEL_ROOT, and raw.githubusercontent.com for the official repository must be accessible).
 
 set -eo pipefail
 
@@ -27,10 +29,10 @@ KSU_DIR="${1:-KernelSU}"
 
 fail() {
   if [ "$SKIP_INCOMPATIBLE" = "true" ]; then
-    echo "::warning title=SukiSU UAPI 同步已跳过::$1"
+    echo "::warning title=SukiSU UAPI sync skipped::$1"
     if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
       echo "" >> "$GITHUB_STEP_SUMMARY"
-      echo "> ⏭️ **SukiSU UAPI 同步** 已自动跳过：$1（构建未中断）" >> "$GITHUB_STEP_SUMMARY"
+      echo "> ⏭️ **SukiSU UAPI sync** automatically skipped: $1 (build not interrupted)" >> "$GITHUB_STEP_SUMMARY"
     fi
     exit 0
   fi
@@ -38,11 +40,11 @@ fail() {
   exit 1
 }
 
-[ -d "$KSU_DIR" ] || fail "未找到 KernelSU 目录: $KSU_DIR"
+[ -d "$KSU_DIR" ] || fail "KernelSU directory not found: $KSU_DIR"
 
 COMPAT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# builtin 分支: kernel/include/uapi/supercall.h；main 分支: uapi/supercall.h
+# builtin branch: kernel/include/uapi/supercall.h; main branch: uapi/supercall.h.
 UAPI_FILE=""
 for f in "$KSU_DIR/kernel/include/uapi/supercall.h" "$KSU_DIR/uapi/supercall.h"; do
   if [ -f "$f" ]; then
@@ -50,13 +52,13 @@ for f in "$KSU_DIR/kernel/include/uapi/supercall.h" "$KSU_DIR/uapi/supercall.h";
     break
   fi
 done
-[ -n "$UAPI_FILE" ] || fail "未找到 supercall.h，SukiSU 源码布局可能已变化"
+[ -n "$UAPI_FILE" ] || fail "supercall.h not found; the SukiSU source layout may have changed"
 
 read_uapi() {
   grep -ohE 'KERNEL_SU_UAPI_VERSION[^0-9]*[0-9]+' "$1" | grep -oE '[0-9]+' | tail -n 1
 }
 
-# 取官方 main 的 supercall.h（web 布局，UAPI 定义以 static const 发布）
+# Fetch supercall.h from official main (web layout; UAPI definitions are published as static const).
 MAIN_URL="https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/uapi/supercall.h"
 MAIN_FILE=$(mktemp)
 MAIN_JSON=""
@@ -64,18 +66,18 @@ for ATTEMPT in 1 2 3; do
   if curl -sL --fail --max-time 60 -o "$MAIN_FILE" "$MAIN_URL" && [ -s "$MAIN_FILE" ]; then
     break
   fi
-  echo "拉取官方 main supercall.h 失败，重试 ($ATTEMPT/3)..."
+  echo "Failed to fetch official main supercall.h; retrying ($ATTEMPT/3)..."
   sleep 5
 done
-[ -s "$MAIN_FILE" ] || fail "无法拉取官方 main uapi/supercall.h，UAPI 同步中止"
+[ -s "$MAIN_FILE" ] || fail "Could not fetch official main uapi/supercall.h; aborting UAPI sync"
 
 MAIN_UAPI=$(read_uapi "$MAIN_FILE")
 CUR_UAPI=$(read_uapi "$UAPI_FILE")
-echo "官方 main UAPI 版本: ${MAIN_UAPI:-未知}, builtin 检出当前 UAPI 版本: ${CUR_UAPI:-未知}"
-[ -n "$MAIN_UAPI" ] || fail "官方 main supercall.h 中未解析到 KERNEL_SU_UAPI_VERSION"
+echo "Official main UAPI version: ${MAIN_UAPI:-unknown}, current checked-out builtin UAPI version: ${CUR_UAPI:-unknown}"
+[ -n "$MAIN_UAPI" ] || fail "Could not parse KERNEL_SU_UAPI_VERSION from official main supercall.h"
 
 if [ "${CUR_UAPI:-0}" -ge "$MAIN_UAPI" ]; then
-  echo "builtin 检出 UAPI >= 官方 main（$CUR_UAPI >= $MAIN_UAPI），无需同步，跳过"
+  echo "Checked-out builtin UAPI >= official main ($CUR_UAPI >= $MAIN_UAPI); no sync needed, skipping"
   rm -f "$MAIN_FILE"
   exit 0
 fi
@@ -94,19 +96,21 @@ def read_num(text, name):
 main_ver = read_num(main, "KERNEL_SU_UAPI_VERSION")
 cur_ver = read_num(uapi, "KERNEL_SU_UAPI_VERSION")
 if not main_ver:
-    print("::error::官方 main supercall.h 缺少 KERNEL_SU_UAPI_VERSION")
+    print("::error::KERNEL_SU_UAPI_VERSION is missing from official main supercall.h")
     sys.exit(1)
 
 changed = []
 
-# 1) 按官方值移植 builtin 缺失的常量（含抬升后的 KERNEL_SU_UAPI_VERSION、
-#    EVENT_*、KSU_GET_INFO_FLAG_*、新 ioctl 常量、KSU_LOOKUP_SYMBOLS_MAX 等）。
-#    声明形式跟随 builtin 现有的 DECLARE 宏（非 BINDGEN 下展开为 enum，
-#    是编译期常量，dispatch.c 的 static 处理表才能引用；main 的 static const
-#    形式在 builtin 的 static 初始化器上下文会报
-#    "initializer element is not a compile-time constant"）。
-#    逐常量移植而非整文件替换：builtin 头还有独立演化内容
-#    （DECLARE 宏、__user 注记的 ksu_kpm_cmd 等），整替换会互相覆盖。
+# 1) Backport missing constants to builtin using the official values (including the
+#    raised KERNEL_SU_UAPI_VERSION, EVENT_*, KSU_GET_INFO_FLAG_*, new ioctl constants,
+#    KSU_LOOKUP_SYMBOLS_MAX, and others). Use the DECLARE macro already present in
+#    builtin (which expands to an enum outside BINDGEN), producing compile-time
+#    constants that the static dispatch table in dispatch.c can reference; main's
+#    static const form causes "initializer element is not a compile-time constant"
+#    in builtin's static initializer context.
+#    Backport constants individually instead of replacing the whole file: the builtin
+#    header has independently evolved content (DECLARE macros, __user annotations in
+#    ksu_kpm_cmd, etc.) that would otherwise be overwritten.
 def parse_decls(text):
     decls = {}
     for m in re.finditer(r"^static const (\w[\w\s\*]*?)\b(\w+)\s*=\s*([^;\n]+);", text, re.M):
@@ -116,10 +120,11 @@ def parse_decls(text):
 main_decls = parse_decls(main)
 has_declare = "#define DECLARE" in uapi
 
-# 2) 移植 builtin 缺失的 struct 定义（如 ksu_lookup_symbols_cmd /
-#    ksu_set_spoof_version_cmd）。struct 必须先于引用它的 _IOW 常量声明，
-#    且插入点需在 include guard 内（supercall.h 会被 ksu.c / dynamic_manager.c
-#    多次 include，文件尾 #endif 之外的内容每次 include 都会重复定义）。
+# 2) Backport struct definitions missing from builtin (such as ksu_lookup_symbols_cmd /
+#    ksu_set_spoof_version_cmd). Structs must precede the _IOW constant declarations
+#    that reference them, and the insertion point must be inside the include guard
+#    (supercall.h is included multiple times by ksu.c / dynamic_manager.c, so content
+#    after the final #endif would be defined repeatedly on every include).
 struct_re = re.compile(r"^struct (\w+) \{(?:[^{}])*?\};", re.M | re.S)
 main_structs = []
 for m in struct_re.finditer(main):
@@ -128,17 +133,18 @@ for m in struct_re.finditer(main):
 missing_structs = [(n, t) for n, t in main_structs if not re.search(r"struct\s+" + re.escape(n) + r"\s*\{", uapi)]
 missing_decls = {n: v for n, v in main_decls.items() if not re.search(r"\b" + re.escape(n) + r"\b", uapi)}
 
-# 统一插入点：flag 区块之后（guard 内、DECLARE 宏之后、struct/常量使用之前）
+# Use a consistent insertion point: after the flag block (inside the guard, after
+# DECLARE macros, and before structs/constants are used).
 anchor = re.search(r"(DECLARE\(__u32, KSU_GET_INFO_FLAG_PR_BUILD[^\n]*\n|static const __u32 KSU_GET_INFO_FLAG_PR_BUILD[^\n]*\n)", uapi)
 if not anchor:
     anchor = re.search(r"(DECLARE\(__u32, KERNEL_SU_UAPI_VERSION[^\n]*\n|static const __u32 KERNEL_SU_UAPI_VERSION[^\n]*\n)", uapi)
 if not anchor:
-    print("::error::builtin supercall.h 缺常量/struct 插入锚点（UAPI/FLAG 区块）")
+    print("::error::Missing constants/struct insertion anchor in builtin supercall.h (UAPI/FLAG block)")
     sys.exit(1)
 pos = anchor.end()
 
 block = "\n// synced from SukiSU-Ultra main uapi/supercall.h (dynamic UAPI sync)\n"
-# struct 先插（同名的 _IOW 常量在插入块里引用它们）
+# Insert structs first (the _IOW constants with the same names in the insertion block reference them).
 for sname, text in missing_structs:
     block += text + "\n"
     changed.append("struct " + sname)
@@ -153,7 +159,7 @@ if missing_decls:
 
 uapi = uapi[:pos] + block + uapi[pos:]
 
-# 3) 抬升 UAPI 号到官方值
+# 3) Raise the UAPI version to the official value.
 if cur_ver is not None and cur_ver < main_ver:
     uapi = re.sub(
         r"((?:DECLARE\(__u32, KERNEL_SU_UAPI_VERSION|static const __u32 KERNEL_SU_UAPI_VERSION)[^\n]*?)\b%d\b" % cur_ver,
@@ -162,60 +168,63 @@ if cur_ver is not None and cur_ver < main_ver:
     changed.append("KERNEL_SU_UAPI_VERSION %d -> %d" % (cur_ver, main_ver))
 
 if not changed:
-    print("supercall.h: 无需移植（UAPI 号与常量均已包含）")
+    print("supercall.h: no backport needed (UAPI version and constants are already present)")
 else:
     open(uapi_path, "w", encoding="utf-8", errors="surrogateescape").write(uapi)
     for c in changed:
-        print("supercall.h: 移植 %s" % c)
+        print("supercall.h: backported %s" % c)
 PYEOF
 
-# ---------------- 内核侧配套能力注入（LOOKUP_SYMBOLS / symbol_resolver） ----------------
-# UAPI >= 6 时管理器会探测 KSU_IOCTL_LOOKUP_SYMBOLS（热装模块符号绑定用）。
-# 该能力依赖 main 分支的 infra/symbol_resolver，builtin 检出缺少它，按内容
-# 检测注入：分发 resolver 源码 + 补内核 include + 接线 do_lookup_symbols。
+# ---------------- Inject Supporting Kernel-Side Functionality (LOOKUP_SYMBOLS / symbol_resolver) ----------------
+# With UAPI >= 6, the manager probes KSU_IOCTL_LOOKUP_SYMBOLS (used to bind symbols
+# for hot-loaded modules). This functionality depends on infra/symbol_resolver from
+# the main branch, which is missing from the builtin checkout. Inject it with content
+# checks: distribute the resolver source, add kernel includes, and wire up do_lookup_symbols.
 if grep -q 'KSU_IOCTL_LOOKUP_SYMBOLS' "$UAPI_FILE" 2>/dev/null; then
   RESOLVER_C="$KSU_DIR/kernel/infra/symbol_resolver.c"
   RESOLVER_H="$KSU_DIR/kernel/infra/symbol_resolver.h"
   if [ ! -f "$RESOLVER_C" ] || ! grep -q 'ksu_lookup_kernel_symbols' "$RESOLVER_C" 2>/dev/null; then
-    echo "注入 infra/symbol_resolver (main 分支 UAPI6 符号批量解析)..."
-    cp "$COMPAT_DIR/symbol_resolver.h" "$RESOLVER_H" || fail "symbol_resolver.h 分发失败"
-    cp "$COMPAT_DIR/symbol_resolver.c" "$RESOLVER_C" || fail "symbol_resolver.c 分发失败"
-    grep -q 'ksu_lookup_kernel_symbols' "$RESOLVER_C" || fail "symbol_resolver.c 分发后校验失败"
+    echo "Injecting infra/symbol_resolver (main-branch UAPI 6 bulk symbol lookup)..."
+    cp "$COMPAT_DIR/symbol_resolver.h" "$RESOLVER_H" || fail "Failed to distribute symbol_resolver.h"
+    cp "$COMPAT_DIR/symbol_resolver.c" "$RESOLVER_C" || fail "Failed to distribute symbol_resolver.c"
+    grep -q 'ksu_lookup_kernel_symbols' "$RESOLVER_C" || fail "symbol_resolver.c validation failed after distribution"
   else
-    echo "infra/symbol_resolver 已存在，跳过分发"
+    echo "infra/symbol_resolver already exists; skipping distribution"
   fi
 
-  # builtin 以 ksu.c unity build 编译（kernel_includes.h 聚合内核头），
-  # resolver 依赖的 bsearch/sort/kallsyms 头不在其中，按需补齐。
+  # builtin compiles ksu.c as a unity build (kernel_includes.h aggregates kernel
+  # headers); the bsearch/sort/kallsyms headers required by the resolver are not
+  # included there, so add them as needed.
   KINC="$KSU_DIR/kernel/kernel_includes.h"
   if [ -f "$KINC" ] && [ -f "$RESOLVER_C" ]; then
     for HDR in bsearch sort kallsyms; do
       if grep -q "ksu_lookup_kernel_symbols" "$RESOLVER_C" && ! grep -q "include <linux/$HDR.h>" "$KINC"; then
         sed -i "s|^#include <linux/kernel.h>|#include <linux/kernel.h>\n#include <linux/$HDR.h>|" "$KINC" \
-          || fail "kernel_includes.h 补 <linux/$HDR.h> 失败"
-        grep -q "include <linux/$HDR.h>" "$KINC" || fail "kernel_includes.h <linux/$HDR.h> 校验失败"
-        echo "kernel_includes.h: 补 <linux/$HDR.h>"
+          || fail "Failed to add <linux/$HDR.h> to kernel_includes.h"
+        grep -q "include <linux/$HDR.h>" "$KINC" || fail "kernel_includes.h <linux/$HDR.h> validation failed"
+        echo "kernel_includes.h: added <linux/$HDR.h>"
       fi
     done
   fi
 
-  # 接线 include + 处理器 + ioctl 表项（builtin dispatch.c 无 include，unity build）
+  # Wire up the include, handler, and ioctl table entry (builtin dispatch.c has no
+  # include section; it is built as a unity build).
   DISPATCH="$KSU_DIR/kernel/supercall/dispatch.c"
   if [ -f "$DISPATCH" ] && [ -f "$RESOLVER_C" ]; then
     if ! grep -q 'do_lookup_symbols' "$DISPATCH"; then
-      echo "接线 supercall/dispatch.c: do_lookup_symbols 处理器..."
+      echo "Wiring up supercall/dispatch.c: do_lookup_symbols handler..."
       python3 - "$DISPATCH" "$UAPI_FILE" <<'PYEOF2'
 import sys, re
 
 path = sys.argv[1]
 s = open(path, encoding="utf-8", errors="surrogateescape").read()
 
-# 1) include resolver（unity build 下放 include 源码前声明）
+# 1) Include the resolver (in a unity build, place it before the source declarations).
 if '#include "infra/symbol_resolver.h"' not in s and '#include "infra/symbol_resolver.c"' not in s:
-    # dispatch.c 无 include 区，用 extern 声明替代
+    # dispatch.c has no include section; use extern declarations instead.
     s = ("extern int ksu_lookup_kernel_symbols(const char *const *names, unsigned long *addrs, u32 count);\n\n" + s)
 
-# 2) do_lookup_symbols 处理器：插在 do_disable_escape_to_root 定义前
+# 2) do_lookup_symbols handler: insert before the do_disable_escape_to_root definition.
 handler = '''/*
  * Batch resolve kernel image symbols (exported or not) for userspace
  * module symbol binding, ported from SukiSU-Ultra main (UAPI 6).
@@ -296,11 +305,11 @@ out:
 '''
 anchor = "static int do_disable_escape_to_root(void __user *arg)"
 if anchor not in s:
-    print("::error::dispatch.c 缺少 do_disable_escape_to_root 锚点，无法插入 do_lookup_symbols")
+    print("::error::dispatch.c is missing the do_disable_escape_to_root anchor; cannot insert do_lookup_symbols")
     sys.exit(1)
 s = s.replace(anchor, handler + anchor, 1)
 
-# 3) ioctl 表项：插在 LOOKUP_SYMBOLS 可用前提下，DISABLE_ESCAPE_TO_ROOT 表项之后
+# 3) ioctl table entry: insert after DISABLE_ESCAPE_TO_ROOT, where LOOKUP_SYMBOLS is available.
 entry = '''    {
         .cmd = KSU_IOCTL_LOOKUP_SYMBOLS,
         .name = "LOOKUP_SYMBOLS",
@@ -310,31 +319,32 @@ entry = '''    {
 '''
 anchor2 = re.search(r"\.cmd = KSU_IOCTL_DISABLE_ESCAPE_TO_ROOT,(?:.*\n)*?    \},\n", s)
 if not anchor2:
-    print("::error::dispatch.c 处理表缺少 DISABLE_ESCAPE_TO_ROOT 锚点")
+    print("::error::dispatch.c dispatch table is missing the DISABLE_ESCAPE_TO_ROOT anchor")
     sys.exit(1)
 s = s[:anchor2.end()] + entry + s[anchor2.end():]
 
 open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
-print("dispatch.c: do_lookup_symbols 处理器 + LOOKUP_SYMBOLS 表项已接线")
+print("dispatch.c: wired up do_lookup_symbols handler + LOOKUP_SYMBOLS table entry")
 PYEOF2
-      grep -q 'do_lookup_symbols' "$DISPATCH" || fail "dispatch.c 接线后校验失败"
+      grep -q 'do_lookup_symbols' "$DISPATCH" || fail "dispatch.c validation failed after wiring"
     else
-      echo "dispatch.c 已包含 do_lookup_symbols，跳过接线"
+      echo "dispatch.c already contains do_lookup_symbols; skipping wiring"
     fi
 
-    # builtin 以 ksu.c unity build 编译（所有 .c 经 #include 聚合进 ksu.o），
-    # resolver 源码必须 #include 进 ksu.c，否则链接报 undefined symbol。
+    # builtin compiles ksu.c as a unity build (all .c files are aggregated into ksu.o
+    # via #include), so the resolver source must be #included in ksu.c or linking
+    # will fail with undefined symbols.
     KSU_C="$KSU_DIR/kernel/ksu.c"
     if [ -f "$KSU_C" ] && ! grep -q '#include "infra/symbol_resolver.c"' "$KSU_C"; then
       sed -i 's|^#include "infra/event_queue.c"|#include "infra/event_queue.c"\n#include "infra/symbol_resolver.c"|' "$KSU_C" \
-        || fail "ksu.c include symbol_resolver.c 失败"
-      grep -q '#include "infra/symbol_resolver.c"' "$KSU_C" || fail "ksu.c symbol_resolver.c include 校验失败"
-      echo "ksu.c: #include infra/symbol_resolver.c 已接入（unity build）"
+        || fail "Failed to include symbol_resolver.c in ksu.c"
+      grep -q '#include "infra/symbol_resolver.c"' "$KSU_C" || fail "ksu.c symbol_resolver.c include validation failed"
+      echo "ksu.c: #include infra/symbol_resolver.c added (unity build)"
     elif [ -f "$KSU_C" ]; then
-      echo "ksu.c 已包含 symbol_resolver.c include，跳过"
+      echo "ksu.c already includes symbol_resolver.c; skipping"
     fi
 
-    # 初始化接线：resolver 的函数指针表需在 kernelsu_init 中初始化
+    # Initialization wiring: initialize the resolver's function-pointer table in kernelsu_init.
     if ! grep -q 'ksu_init_symbol_resolver' "$KSU_C" 2>/dev/null; then
       python3 - "$KSU_C" <<'PYEOF3'
 import sys, re
@@ -345,21 +355,21 @@ if "ksu_init_symbol_resolver();" not in s:
     if anchor in s:
         s = s.replace(anchor, anchor + "\n\n    ksu_init_symbol_resolver();", 1)
         open(path, "w", encoding="utf-8", errors="surrogateescape").write(s)
-        print("ksu.c: ksu_init_symbol_resolver() 已接入 kernelsu_init")
+        print("ksu.c: added ksu_init_symbol_resolver() to kernelsu_init")
     else:
-        print("::warning::ksu.c 缺少 ksu_supercalls_init 锚点，resolver 初始化未接线（LOOKUP_SYMBOLS 将退化为未初始化 walker）")
+        print("::warning::ksu.c is missing the ksu_supercalls_init anchor; resolver initialization was not wired (LOOKUP_SYMBOLS will fall back to an uninitialized walker)")
 else:
-    print("ksu.c 已包含 ksu_init_symbol_resolver() 调用，跳过")
+    print("ksu.c already contains the ksu_init_symbol_resolver() call; skipping")
 PYEOF3
     else
-      echo "ksu.c 已包含 ksu_init_symbol_resolver() 调用，跳过"
+      echo "ksu.c already contains the ksu_init_symbol_resolver() call; skipping"
     fi
   fi
 else
-  echo "UAPI < 6 无 LOOKUP_SYMBOLS，跳过内核侧能力注入"
+  echo "UAPI < 6 has no LOOKUP_SYMBOLS; skipping kernel-side functionality injection"
 fi
 
 FINAL_UAPI=$(read_uapi "$UAPI_FILE")
-[ "${FINAL_UAPI:-0}" -eq "$MAIN_UAPI" ] || fail "UAPI 号校验失败（期望 $MAIN_UAPI，实际 ${FINAL_UAPI:-未知}）"
-echo "UAPI 同步完成：builtin 检出 UAPI $CUR_UAPI -> $FINAL_UAPI（官方 main $MAIN_UAPI）"
+[ "${FINAL_UAPI:-0}" -eq "$MAIN_UAPI" ] || fail "UAPI version validation failed (expected $MAIN_UAPI, got ${FINAL_UAPI:-unknown})"
+echo "UAPI sync complete: checked-out builtin UAPI $CUR_UAPI -> $FINAL_UAPI (official main $MAIN_UAPI)"
 rm -f "$MAIN_FILE"

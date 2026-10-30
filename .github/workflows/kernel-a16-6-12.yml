@@ -1,4 +1,4 @@
-name: 内核构建 - Android 16 (6.12)
+name: Kernel build - Android 16 (6.12)
 
 permissions:
   contents: write
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       kernelsu_variant:
-        description: "KernelSU 变体"
+        description: "KernelSU variant"
         required: true
         type: choice
         options:
@@ -17,33 +17,33 @@ on:
           - FinaSU
         default: FinaSU
       build_channel:
-        description: "构建通道（正式=官方 Release 发行版，最新=上游最新提交）"
+        description: "Build channel (official = official Release; latest = latest upstream commit)"
         required: false
         type: choice
         options:
-          - "正式 (Release)"
-          - "最新 (HEAD)"
-        default: "正式 (Release)"
+          - "Official (Release)"
+          - "Latest (HEAD)"
+        default: "Official (Release)"
       version:
-        description: "自定义版本名 (可选)"
+        description: "Custom version name (optional)"
         required: false
         type: string
       build_time:
-        description: "自定义构建时间 (留空=自动获取当前北京时间) (示例 Tue Dec  1 08:10:00 UTC 2026)"
+        description: "Custom build time (leave blank to use the current Beijing time automatically; example: Tue Dec  1 08:10:00 UTC 2026)"
         required: false
         type: string
         default: ""
       use_kpm:
-        description: "KPM 功能（仅SukiSU支持）"
+        description: "KPM feature (supported by SukiSU only)"
         required: true
         type: choice
-        default: "disabled (关闭)"
+        default: "disabled (off)"
         options:
-          - "disabled (关闭)"
-          - "enabled (开启)"
-          - "patched (开启并修补)"
+          - "disabled (off)"
+          - "enabled (on)"
+          - "patched (on with patch)"
       droidspaces:
-        description: "Droidspaces 容器支持"
+        description: "Droidspaces container support"
         required: false
         type: choice
         options:
@@ -51,55 +51,55 @@ on:
           - "on"
         default: "off"
       artifact_upload_mode:
-        description: "构建产物上传模式"
+        description: "Build artifact upload mode"
         required: true
         type: choice
         options:
-          - "仅上传 AnyKernel3.zip"
-          - "上传全部"
-        default: "仅上传 AnyKernel3.zip"
+          - "Upload AnyKernel3.zip only"
+          - "Upload all"
+        default: "Upload AnyKernel3.zip only"
       droidspaces_ntsync:
-        description: "启用 Droidspaces 容器 NTSync 支持（需启用 Droidspaces）"
+        description: "Enable NTSync support for the Droidspaces container (requires Droidspaces)"
         required: false
         type: boolean
         default: false
       use_zram:
-        description: "启用 ZRAM 压缩算法"
+        description: "Enable the ZRAM compression algorithm"
         required: true
         type: boolean
         default: false
       use_bbg:
-        description: "启用 BBG 基带保护"
+        description: "Enable BBG baseband protection"
         required: true
         type: boolean
         default: false
       use_net_enhance:
-        description: "启用 网络增强 (BBRv3 + IPSet + Qdisc + CIFS)"
+        description: "Enable network enhancements (BBRv3 + IPSet + Qdisc + CIFS)"
         required: true
         type: boolean
         default: false
       use_rekernel:
-        description: "启用 Re-Kernel 驱动"
+        description: "Enable the Re-Kernel driver"
         required: false
         type: boolean
         default: false
       cve_2026_43499_patch:
-        description: "应用 CVE-2026-43499 rtmutex 修复链"
+        description: "Apply the CVE-2026-43499 rtmutex fix series"
         required: false
         type: boolean
         default: false
       cancel_susfs:
-        description: "禁用 SUSFS"
+        description: "Disable SUSFS"
         required: true
         type: boolean
         default: false
       supp_op:
-        description: "启用 一加 骁龙8 Elite/Gen5 支持"
+        description: "Enable OnePlus Snapdragon 8 Elite/Gen5 support"
         required: false
         type: boolean
         default: false
       skip_incompatible:
-        description: "功能不兼容或无法使用时自动跳过该功能（不中断构建）"
+        description: "Automatically skip features that are incompatible or unavailable (without interrupting the build)"
         required: false
         type: boolean
         default: false
@@ -109,10 +109,10 @@ on:
         required: true
         type: string
       build_channel:
-        description: "构建通道（从 main.yml 传入；直接触发时取本工作流拉取的管理器来源）"
+        description: "Build channel (passed from main.yml; when triggered directly, use the source of the manager fetched by this workflow)"
         required: false
         type: string
-        default: "正式 (Release)"
+        default: "Official (Release)"
       version:
         required: false
         type: string
@@ -154,7 +154,7 @@ on:
       artifact_upload_mode:
         required: false
         type: string
-        default: "上传全部"
+        default: "Upload all"
       droidspaces_ntsync:
         required: false
         type: boolean
@@ -164,24 +164,24 @@ on:
         type: boolean
         default: false
       called_from_main:
-        description: "是否从 main.yml 调用（内部使用）"
+        description: "Whether called from main.yml (internal use)"
         required: false
         type: boolean
         default: false
       ksu_commit:
-        description: "官方最新上传构建的 KernelSU 提交（从 main.yml 传入；直接触发时自动取本工作流拉取的管理器构建）"
+        description: "KernelSU commit from the latest official uploaded build (passed from main.yml; when triggered directly, automatically use the manager build fetched by this workflow)"
         required: false
         type: string
         default: ""
 
       ksu_cert_size:
-        description: "FinaSU 管理器签名证书 DER 尺寸（从 main.yml 传入；直接触发时自动取本工作流拉取的管理器证书）"
+        description: "FinaSU manager signing certificate DER size (passed from main.yml; when triggered directly, automatically use the certificate from the manager fetched by this workflow)"
         required: false
         type: string
         default: ""
 
       ksu_cert_hash:
-        description: "FinaSU 管理器签名证书 SHA256（从 main.yml 传入；直接触发时自动取本工作流拉取的管理器证书）"
+        description: "FinaSU manager signing certificate SHA256 (passed from main.yml; when triggered directly, automatically use the certificate from the manager fetched by this workflow)"
         required: false
         type: string
         default: ""
@@ -190,7 +190,7 @@ jobs:
   build-kernels-a16-6-12:
     name: "6.12.${{ matrix.display_sub || matrix.sub_level }}-${{ matrix.os_patch_level }}"
     needs: get-ksu-manager
-    # 管理器作业被跳过（called_from_main）或失败时不阻塞构建；ksuCommit 为空时回退传入值或 main HEAD
+    # The build is not blocked if the manager job is skipped (called_from_main) or fails; if ksuCommit is empty, fall back to the passed value or main HEAD
     if: ${{ !cancelled() }}
     strategy:
       fail-fast: false
@@ -241,7 +241,7 @@ jobs:
       artifact_upload_mode: ${{ inputs.artifact_upload_mode }}
       skip_incompatible: ${{ inputs.skip_incompatible || false }}
 
-  # 仅在直接触发时运行，从 main.yml 调用时跳过
+  # Run only when triggered directly; skip when called from main.yml
   get-ksu-manager:
     if: ${{ !inputs.called_from_main }}
     uses: ./.github/workflows/get-manager.yml

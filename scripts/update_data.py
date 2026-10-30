@@ -1,6 +1,6 @@
-"""增量更新 GKI 内核版本数据。
+"""Incrementally update GKI kernel version data.
 
-读取现有 JSON 数据，仅抓取缺失的月份，同时更新 LTS 版本。
+Read existing JSON data, fetch only missing months, and update LTS versions.
 """
 
 import json
@@ -17,12 +17,12 @@ from gki_fetch import (
 def update_target(android_ver: str, kernel_ver: str,
                   date_start: str, date_end: str | None,
                   dep_cutoff: str) -> bool:
-    """增量更新单个目标，返回是否有数据变更"""
+    """Incrementally update one target and return whether any data changed."""
     path = json_path(android_ver, kernel_ver)
     end = get_end_date(date_end)
     changed = False
 
-    # 读取现有数据
+    # Read existing data.
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -36,8 +36,8 @@ def update_target(android_ver: str, kernel_ver: str,
         }
         entries = []
 
-    # 确定需要抓取的日期范围
-    # 从 date_start 开始扫描，过滤掉已有日期，可自动填补之前遗漏的月份
+    # Determine the date range to fetch.
+    # Scan from date_start, skip dates already present, and automatically fill in previously missing months.
     existing_dates = {e["date"] for e in entries}
     all_dates = make_date_range(date_start, end)
     new_dates = [d for d in all_dates if d not in existing_dates]
@@ -67,10 +67,10 @@ def update_target(android_ver: str, kernel_ver: str,
             print(f"-> {detail}")
             time.sleep(0.3)
 
-    # 按日期排序
+    # Sort by date.
     entries.sort(key=lambda e: e["date"])
 
-    # 更新 LTS
+    # Update LTS.
     lts_label = f"{android_ver}-{kernel_ver}-lts"
     print(f"  [{lts_label}] ", end="", flush=True)
     lts_text = fetch_lts(android_ver, kernel_ver)
@@ -91,7 +91,7 @@ def update_target(android_ver: str, kernel_ver: str,
                 print(f"-> {lts_value} (unchanged)")
             data["lts"] = lts_value
 
-    # 保存
+    # Save.
     data["entries"] = entries
     if changed:
         os.makedirs(os.path.dirname(path), exist_ok=True)

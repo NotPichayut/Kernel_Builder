@@ -12,8 +12,8 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 
-# (android版本, 内核版本): (起始日期, 结束日期, deprecated截止日期)
-# 结束日期为 None 表示活跃版本，运行时自动使用当前月份
+# (Android version, kernel version): (start date, end date, deprecated cutoff date)
+# An end date of None indicates an active version; the current month is used at runtime.
 TARGETS = {
     ("android12", "5.10"): ("2021-08", "2025-12", "2024-08"),
     ("android13", "5.15"): ("2022-06", "2025-12", "2024-09"),
@@ -31,14 +31,14 @@ ERRORS = (urllib.error.HTTPError, urllib.error.URLError,
 
 
 def get_end_date(end: str | None) -> str:
-    """返回结束日期：如果为 None 则使用当前月份"""
+    """Return the end date, using the current month if it is None."""
     if end is not None:
         return end
     return datetime.now().strftime("%Y-%m")
 
 
 def make_date_range(start: str, end: str) -> list[str]:
-    """生成从 start 到 end 的 YYYY-MM 列表"""
+    """Generate a list of YYYY-MM values from start to end."""
     sy, sm = map(int, start.split("-"))
     ey, em = map(int, end.split("-"))
     dates = []
@@ -53,7 +53,7 @@ def make_date_range(start: str, end: str) -> list[str]:
 
 
 def try_fetch(url: str, attempts: int = 3) -> str | None:
-    """尝试请求一个 URL，瞬时失败自动重试，最终失败返回 None"""
+    """Try to request a URL, retry transient failures, and return None if all attempts fail."""
     for attempt in range(1, attempts + 1):
         try:
             with urllib.request.urlopen(url, timeout=20) as resp:
@@ -67,7 +67,7 @@ def try_fetch(url: str, attempts: int = 3) -> str | None:
 
 def fetch_makefile(android_ver: str, kernel_ver: str, date: str,
                    dep_cutoff: str) -> str | None:
-    """获取日期分支 Makefile，优先尝试预期路径，失败则回退"""
+    """Fetch a date-branch Makefile, trying the expected path first and falling back on failure."""
     branch = f"{android_ver}-{kernel_ver}-{date}"
     if dep_cutoff and date <= dep_cutoff:
         paths = [f"deprecated/{branch}", branch]
@@ -84,14 +84,14 @@ def fetch_makefile(android_ver: str, kernel_ver: str, date: str,
 
 
 def fetch_lts(android_ver: str, kernel_ver: str) -> str | None:
-    """获取 LTS 分支 Makefile"""
+    """Fetch the LTS branch Makefile."""
     lts_branch = f"{android_ver}-{kernel_ver}-lts"
     url = f"{BASE_URL}/{lts_branch}/Makefile?format=TEXT"
     return try_fetch(url)
 
 
 def parse_version(makefile_text: str) -> tuple[str, str, str] | None:
-    """从 Makefile 提取 VERSION, PATCHLEVEL, SUBLEVEL"""
+    """Extract VERSION, PATCHLEVEL, and SUBLEVEL from a Makefile."""
     vals = {}
     for key in ("VERSION", "PATCHLEVEL", "SUBLEVEL"):
         m = re.search(rf"^{key}\s*=\s*(\d+)", makefile_text, re.MULTILINE)
@@ -102,5 +102,5 @@ def parse_version(makefile_text: str) -> tuple[str, str, str] | None:
 
 
 def json_path(android_ver: str, kernel_ver: str) -> str:
-    """返回对应的 JSON 文件路径"""
+    """Return the corresponding JSON file path."""
     return os.path.join(DATA_DIR, android_ver, f"{kernel_ver}.json")
